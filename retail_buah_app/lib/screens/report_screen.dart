@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import '../widgets/theme_toggle_button.dart';
 
 class ReportScreen extends StatefulWidget {
   const ReportScreen({super.key});
@@ -23,8 +24,16 @@ class _ReportScreenState extends State<ReportScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text("Laporan Penjualan"), backgroundColor: Colors.purple),
+      appBar: AppBar(
+        title: const Text("Laporan Penjualan"),
+        backgroundColor: theme.appBarTheme.backgroundColor,
+        actions: const [
+          ThemeToggleButton(),
+        ],
+      ),
+      backgroundColor: theme.scaffoldBackgroundColor,
       body: ListView.builder(
         itemCount: logs.length,
         itemBuilder: (ctx, i) => ListTile(
