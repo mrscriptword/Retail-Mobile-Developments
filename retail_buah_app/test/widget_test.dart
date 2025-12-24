@@ -8,13 +8,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:retail_buah_app/screens/auth_screen.dart';
+import 'package:retail_buah_app/screens/login.dart';
 
 void main() {
   testWidgets('Login screen appears on startup', (WidgetTester tester) async {
     // Build our app and trigger a frame.
     await tester.pumpWidget(const MaterialApp(
-      home: AuthScreen(),
+      home: LoginScreen(),
       debugShowCheckedModeBanner: false,
     ));
 

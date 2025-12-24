@@ -2,11 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import '../widgets/theme_toggle_button.dart';
+import 'product_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final String role;
   final Function(dynamic)? onAddToCart;
-  const HomeScreen({super.key, required this.role, this.onAddToCart});
+  final String searchQuery;  // ADD: Search query parameter
+  const HomeScreen({
+    super.key, 
+    required this.role, 
+    this.onAddToCart,
+    this.searchQuery = '',  // Default empty string
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -32,12 +40,25 @@ class _HomeScreenState extends State<HomeScreen> {
     _fetchProducts();
   }
 
+  // ADD: Filter products based on search query
+  List<dynamic> _filteredProducts() {
+    if (widget.searchQuery.isEmpty) {
+      return products;
+    }
+    return products.where((product) {
+      final productName = (product['nama'] ?? '').toString().toLowerCase();
+      final query = widget.searchQuery.toLowerCase();
+      return productName.contains(query);
+    }).toList();
+  }
+
   Future<void> _fetchProducts() async {
     try {
       final response = await dio.get(baseUrl);
       setState(() {
         products = response.data ?? [];
         _isLoading = false;
+        _showLowStockNotification();
       });
     } catch (e) {
       if (mounted) {
@@ -57,8 +78,92 @@ class _HomeScreenState extends State<HomeScreen> {
     return 'PROD_${productId}_$productName';
   }
 
+  void _showQuantityDialog(dynamic product) {
+    int quantity = 1;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+              title: Text(
+                'Berapa ${product['nama']}?',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Stok tersedia: ${product['stok']} kg',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 20),
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: theme.dividerColor),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.remove),
+                          onPressed: quantity > 1
+                              ? () => setState(() => quantity--)
+                              : null,
+                        ),
+                        Text(
+                          '$quantity',
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            color: const Color(0xFF00BCD4),
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.add),
+                          onPressed: quantity < (product['stok'] ?? 0)
+                              ? () => setState(() => quantity++)
+                              : null,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(
+                    'Batal',
+                    style: TextStyle(color: Colors.grey[600]),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    product['quantity'] = quantity;
+                    widget.onAddToCart?.call(product);
+                    Navigator.pop(context);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF00BCD4),
+                  ),
+                  child: const Text('Tambah', style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildQRCodeWidget(String qrData) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
@@ -109,6 +214,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _fetchProducts();
             },
           ),
+          const ThemeToggleButton(),
         ],
       ),
       body: _isLoading
@@ -117,7 +223,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00BCD4)),
               ),
             )
-          : products.isEmpty
+          : products.isEmpty || _filteredProducts().isEmpty
               ? Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -129,7 +235,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        'Tidak ada produk',
+                        products.isEmpty ? 'Tidak ada produk' : 'Hasil pencarian tidak ditemukan',
                         style: theme.textTheme.titleLarge?.copyWith(
                           color: isDark ? Colors.grey[500] : Colors.grey[600],
                         ),
@@ -162,9 +268,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         ListView.builder(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
-                          itemCount: products.length,
+                          itemCount: _filteredProducts().length,
                           itemBuilder: (context, index) {
-                            final product = products[index];
+                            final product = _filteredProducts()[index];
                             // Row color adaptif
                             final rowColor = index % 2 == 0 
                                 ? (isDark ? Colors.grey[900] : Colors.grey[50])
@@ -174,17 +280,30 @@ class _HomeScreenState extends State<HomeScreen> {
                               color: rowColor,
                               child: Column(
                                 children: [
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                                    child: Row(
-                                      children: [
-                                        _buildCellText('${index + 1}', width: 40),
-                                        _buildImageCell(product['gambar']),
-                                        Expanded(child: _buildCellText(product['nama'] ?? '-', textAlign: TextAlign.left, isBold: true)),
-                                        _buildCellText('${product['stok'] ?? 0}', width: 70, color: const Color(0xFF00BCD4)),
-                                        _buildQRCell(product),
-                                        if (widget.role == 'staff') _buildActionCell(product),
-                                      ],
+                                  GestureDetector(
+                                    onTap: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => ProductDetailScreen(
+                                            product: product,
+                                            storageUrl: storageUrl,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                                      child: Row(
+                                        children: [
+                                          _buildCellText('${index + 1}', width: 40),
+                                          _buildImageCell(product['gambar']),
+                                          Expanded(child: _buildCellText(product['nama'] ?? '-', textAlign: TextAlign.left, isBold: true)),
+                                          _buildCellText('${product['stok'] ?? 0}', width: 70, color: const Color(0xFF00BCD4)),
+                                          _buildQRCell(product),
+                                          if (widget.role == 'staff') _buildActionCell(product),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                   Divider(height: 1, color: theme.dividerColor, indent: 8, endIndent: 8),
@@ -271,7 +390,7 @@ class _HomeScreenState extends State<HomeScreen> {
       width: 70,
       child: Center(
         child: ElevatedButton(
-          onPressed: () => widget.onAddToCart?.call(product),
+          onPressed: () => _showQuantityDialog(product),
           style: ElevatedButton.styleFrom(
             backgroundColor: const Color(0xFF00BCD4),
             foregroundColor: Colors.white,
@@ -283,5 +402,33 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+
+  void _showLowStockNotification() {
+    final lowStockProducts = products.where((p) => (p['stok'] ?? 0) < 5).toList();
+    
+    if (lowStockProducts.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('⚠️ Peringatan Stok Menipis', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Text(
+                  'Produk berikut stoknya menipis (<5kg):\n' +
+                      lowStockProducts.map((p) => '• ${p['nama']} (${p['stok']}kg)').join('\n'),
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      });
+    }
   }
 }

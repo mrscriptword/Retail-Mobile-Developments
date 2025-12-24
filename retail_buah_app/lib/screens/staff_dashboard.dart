@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import '../main.dart'; // Import main untuk akses switcher tema
 import 'home_screen.dart';
 import 'login.dart';
+import '../widgets/theme_toggle_button.dart';
 
 class StaffDashboard extends StatefulWidget {
   const StaffDashboard({super.key});
@@ -17,6 +17,7 @@ class _StaffDashboardState extends State<StaffDashboard> {
   final dio = Dio();
   List<dynamic> cartItems = [];
   List<dynamic> transactionHistory = [];
+  String searchQuery = '';  // ADD: Search query state
 
   String get baseUrl => kIsWeb ? 'http://localhost:3000/api' : 'http://10.0.2.2:3000/api';
 
@@ -41,18 +42,20 @@ class _StaffDashboardState extends State<StaffDashboard> {
 
   void _addToCart(dynamic product) {
     final existingItemIndex = cartItems.indexWhere((item) => item['_id'] == product['_id']);
+    final quantity = product['quantity'] ?? 1;
 
     setState(() {
       if (existingItemIndex != -1) {
-        cartItems[existingItemIndex]['quantity'] = (cartItems[existingItemIndex]['quantity'] ?? 1) + 1;
+        cartItems[existingItemIndex]['quantity'] = 
+            (cartItems[existingItemIndex]['quantity'] ?? 1) + quantity;
       } else {
-        cartItems.add({...product, 'quantity': 1});
+        cartItems.add({...product, 'quantity': quantity});
       }
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('${product['nama']} ditambah ke keranjang'),
+        content: Text('${product['nama']} x$quantity ditambah ke keranjang'),
         duration: const Duration(seconds: 1),
       ),
     );
@@ -124,16 +127,8 @@ class _StaffDashboardState extends State<StaffDashboard> {
             );
           },
         ),
-        actions: [
-          // TOMBOL SWITCH TEMA
-          IconButton(
-            icon: Icon(isDark ? Icons.light_mode : Icons.dark_mode,
-                color: isDark ? Colors.white : Colors.black87),
-            onPressed: () {
-              final newMode = isDark ? ThemeMode.light : ThemeMode.dark;
-              MyApp.of(context)?.changeTheme(newMode);
-            },
-          ),
+        actions: const [
+          ThemeToggleButton(),
         ],
       ),
       body: IndexedStack(
@@ -162,7 +157,35 @@ class _StaffDashboardState extends State<StaffDashboard> {
       children: [
         Expanded(
           flex: 2,
-          child: HomeScreen(role: 'staff', onAddToCart: _addToCart),
+          child: Column(
+            children: [
+              // Search Bar
+              Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: TextField(
+                  onChanged: (value) => setState(() => searchQuery = value),
+                  decoration: InputDecoration(
+                    hintText: 'Cari produk...',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    filled: true,
+                    fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
+                  ),
+                ),
+              ),
+              // Product List with Search Filter
+              Expanded(
+                child: HomeScreen(
+                  role: 'staff',
+                  onAddToCart: _addToCart,
+                  searchQuery: searchQuery,  // Pass search query
+                ),
+              ),
+            ],
+          ),
         ),
         Expanded(
           flex: 1,

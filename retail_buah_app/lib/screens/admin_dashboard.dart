@@ -3,9 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
-import '../main.dart'; 
 import 'home_screen.dart';
 import 'login.dart';
+import '../widgets/theme_toggle_button.dart';
+import 'analytics_dashboard.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -35,21 +36,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
           icon: const Icon(Icons.logout, color: Colors.redAccent),
           onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen())),
         ),
-        actions: [
-          IconButton(
-            icon: Icon(isDark ? Icons.light_mode : Icons.dark_mode),
-            onPressed: () {
-              final newMode = isDark ? ThemeMode.light : ThemeMode.dark;
-              MyApp.of(context)?.changeTheme(newMode);
-            },
-          ),
+        actions: const [
+          ThemeToggleButton(),
         ],
       ),
       body: IndexedStack(
         index: _selectedIndex,
         children: [
           HomeScreen(role: 'admin'),
-          const _AnalyticsTab(),
+          _AnalyticsTab(baseUrl: baseUrl, dio: dio),
           _ProductsTab(baseUrl: baseUrl, storageUrl: storageUrl, dio: dio),
           _StaffTab(baseUrl: baseUrl, dio: dio),
         ],
@@ -212,7 +207,7 @@ class _ProductsTabState extends State<_ProductsTab> {
   }
 }
 
-// ================= TAB STAFF (VIEW + DELETE) =================
+// ================= TAB STAFF (VIEW + EDIT + DELETE + FILTER) =================
 class _StaffTab extends StatefulWidget {
   final String baseUrl;
   final Dio dio;
@@ -224,48 +219,257 @@ class _StaffTab extends StatefulWidget {
 
 class _StaffTabState extends State<_StaffTab> {
   List staffList = [];
-  @override
-  void initState() { super.initState(); _fetchStaff(); }
+  List filteredStaffList = [];
+  String selectedFilter = 'semua'; // 'semua', 'admin', 'staff'
 
-  Future _fetchStaff() async {
-    final res = await widget.dio.get('${widget.baseUrl}/users');
-    setState(() => staffList = res.data ?? []);
+  @override
+  void initState() { 
+    super.initState(); 
+    _fetchStaff(); 
+  }
+
+  Future _fetchStaff({String? role}) async {
+    try {
+      final url = role != null && role != 'semua' 
+          ? '${widget.baseUrl}/users?role=$role'
+          : '${widget.baseUrl}/users';
+      final res = await widget.dio.get(url);
+      setState(() {
+        staffList = res.data ?? [];
+        _applyFilter();
+      });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
+
+  void _applyFilter() {
+    if (selectedFilter == 'semua') {
+      filteredStaffList = staffList;
+    } else {
+      filteredStaffList = staffList.where((u) => u['role'] == selectedFilter).toList();
+    }
+  }
+
+  void _showEditDialog(dynamic user) {
+    final usernameC = TextEditingController(text: user['username']);
+    final passwordC = TextEditingController();
+    String selectedRole = user['role'];
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setST) => AlertDialog(
+          title: const Text('Edit Staff'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: usernameC,
+                  decoration: const InputDecoration(
+                    labelText: 'Username',
+                    prefixIcon: Icon(Icons.person),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: passwordC,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Password Baru (kosongkan jika tidak diubah)',
+                    prefixIcon: Icon(Icons.lock),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: selectedRole,
+                  decoration: const InputDecoration(
+                    labelText: 'Role',
+                    prefixIcon: Icon(Icons.security),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'admin', child: Text('Admin')),
+                    DropdownMenuItem(value: 'staff', child: Text('Staff')),
+                  ],
+                  onChanged: (val) => setST(() => selectedRole = val ?? 'staff'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+            ElevatedButton(
+              onPressed: () async {
+                try {
+                  final updateData = {
+                    'username': usernameC.text,
+                    'role': selectedRole,
+                  };
+                  if (passwordC.text.isNotEmpty) {
+                    updateData['password'] = passwordC.text;
+                  }
+                  await widget.dio.put('${widget.baseUrl}/users/${user['_id']}', data: updateData);
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('✅ Staff berhasil diperbarui')),
+                  );
+                  _fetchStaff(role: selectedFilter != 'semua' ? selectedFilter : null);
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('❌ Error: $e')),
+                  );
+                }
+              },
+              child: const Text('Simpan'),
+            )
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return RefreshIndicator(
-      onRefresh: _fetchStaff,
-      child: staffList.isEmpty ? const Center(child: Text("Tidak ada staff")) : ListView.builder(
-        padding: const EdgeInsets.all(12),
-        itemCount: staffList.length,
-        itemBuilder: (ctx, i) {
-          final user = staffList[i];
-          return Card(
-            child: ListTile(
-              leading: const CircleAvatar(backgroundColor: Color(0xFF00BCD4), child: Icon(Icons.person, color: Colors.white)),
-              title: Text(user['username'], style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text("Role: ${user['role']}"),
-              trailing: IconButton(
-                icon: const Icon(Icons.person_remove, color: Colors.redAccent),
-                onPressed: () async {
-                  bool? confirm = await showDialog(context: context, builder: (ctx) => AlertDialog(
-                    title: const Text("Hapus Akun?"),
-                    content: Text("Yakin ingin menghapus ${user['username']}?"),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Batal")),
-                      TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Hapus", style: TextStyle(color: Colors.red))),
-                    ],
-                  ));
-                  if (confirm == true) {
-                    await widget.dio.delete('${widget.baseUrl}/users/${user['_id']}');
-                    _fetchStaff();
-                  }
-                },
-              ),
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Column(
+      children: [
+        // Filter Buttons
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                const Text('Filter: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(width: 8),
+                _buildFilterButton('Semua', 'semua', isDark),
+                const SizedBox(width: 8),
+                _buildFilterButton('Admin', 'admin', isDark),
+                const SizedBox(width: 8),
+                _buildFilterButton('Staff', 'staff', isDark),
+              ],
             ),
-          );
-        },
+          ),
+        ),
+        // Staff List
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: () => _fetchStaff(role: selectedFilter != 'semua' ? selectedFilter : null),
+            child: filteredStaffList.isEmpty 
+                ? const Center(child: Text("Tidak ada staff")) 
+                : ListView.builder(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: filteredStaffList.length,
+                  itemBuilder: (ctx, i) {
+                    final user = filteredStaffList[i];
+                    final roleColor = user['role'] == 'admin' ? Colors.purple : Colors.blue;
+                    
+                    return Card(
+                      elevation: 2,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: roleColor,
+                          child: const Icon(Icons.person, color: Colors.white),
+                        ),
+                        title: Text(
+                          user['username'],
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: roleColor.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                'Role: ${user['role'].toUpperCase()}',
+                                style: TextStyle(
+                                  color: roleColor,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit, color: Colors.blue),
+                              onPressed: () => _showEditDialog(user),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.person_remove, color: Colors.redAccent),
+                              onPressed: () async {
+                                bool? confirm = await showDialog(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    title: const Text("Hapus Akun?"),
+                                    content: Text("Yakin ingin menghapus ${user['username']}?"),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(ctx, false),
+                                        child: const Text("Batal"),
+                                      ),
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(ctx, true),
+                                        child: const Text("Hapus", style: TextStyle(color: Colors.red)),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (confirm == true) {
+                                  try {
+                                    await widget.dio.delete('${widget.baseUrl}/users/${user['_id']}');
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('✅ Staff berhasil dihapus')),
+                                    );
+                                    _fetchStaff(role: selectedFilter != 'semua' ? selectedFilter : null);
+                                  } catch (e) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('❌ Error: $e')),
+                                    );
+                                  }
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFilterButton(String label, String value, bool isDark) {
+    final isSelected = selectedFilter == value;
+    return FilterChip(
+      label: Text(label),
+      selected: isSelected,
+      onSelected: (selected) {
+        setState(() {
+          selectedFilter = value;
+          _applyFilter();
+        });
+      },
+      backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
+      selectedColor: const Color(0xFF00BCD4),
+      labelStyle: TextStyle(
+        color: isSelected ? Colors.white : (isDark ? Colors.white : Colors.black),
+        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
       ),
     );
   }
@@ -273,44 +477,50 @@ class _StaffTabState extends State<_StaffTab> {
 
 // ================= TAB ANALITIK =================
 class _AnalyticsTab extends StatefulWidget {
-  const _AnalyticsTab();
+  final String baseUrl;
+  final Dio dio;
+  const _AnalyticsTab({required this.baseUrl, required this.dio});
+
   @override
   State<_AnalyticsTab> createState() => _AnalyticsTabState();
 }
 
 class _AnalyticsTabState extends State<_AnalyticsTab> {
-  final dio = Dio();
-  List trans = [];
-  int total = 0;
-  String get baseUrl => kIsWeb ? 'http://localhost:3000/api' : 'http://10.0.2.2:3000/api';
+  List<dynamic> transactions = [];
+  List<dynamic> products = [];
+  bool _isLoading = true;
 
   @override
-  void initState() { super.initState(); _fetch(); }
+  void initState() {
+    super.initState();
+    _fetchData();
+  }
 
-  Future _fetch() async {
-    final res = await dio.get('$baseUrl/transactions');
-    setState(() {
-      trans = res.data ?? [];
-      total = trans.fold(0, (s, item) => s + (item['totalHarga'] as int));
-    });
+  Future<void> _fetchData() async {
+    try {
+      final txRes = await widget.dio.get('${widget.baseUrl}/transactions');
+      final pdRes = await widget.dio.get('${widget.baseUrl}/products');
+      setState(() {
+        transactions = txRes.data ?? [];
+        products = pdRes.data ?? [];
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() => _isLoading = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Card(
-          color: Colors.green.withOpacity(0.1),
-          child: ListTile(
-            title: const Text("Total Omset"),
-            subtitle: Text("Rp $total", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.green)),
-            leading: const Icon(Icons.payments, color: Colors.green, size: 40),
-          ),
-        ),
-        const SizedBox(height: 10),
-        ...trans.map((t) => ListTile(title: Text(t['namaBuah']), subtitle: Text("${t['jumlah']} kg"), trailing: Text("Rp ${t['totalHarga']}"))).toList(),
-      ],
-    );
+    return _isLoading
+        ? const Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00BCD4)),
+            ),
+          )
+        : AnalyticsDashboard(
+            transactions: transactions,
+            products: products,
+          );
   }
 }

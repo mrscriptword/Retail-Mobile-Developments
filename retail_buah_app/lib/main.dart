@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'screens/auth_screen.dart';
+import 'screens/login.dart';
 
 void main() {
   runApp(const MyApp());
@@ -49,7 +49,7 @@ class _MyAppState extends State<MyApp> {
       ),
 
       themeMode: _themeMode,
-      home: const AuthScreen(),
+      home: const LoginScreen(),
     );
   }
 }
